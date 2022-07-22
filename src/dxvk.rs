@@ -1,4 +1,5 @@
 use sha1::Sha1;
+use std::num::NonZeroU32;
 
 pub type Sha1Hash = [u8; HASH_SIZE];
 pub const LEGACY_VERSION: u32 = 7;
@@ -8,16 +9,43 @@ const SHA1_EMPTY: Sha1Hash = [
     218, 57, 163, 238, 94, 107, 75, 13, 50, 85, 191, 239, 149, 96, 24, 144, 175, 216, 7, 9
 ];
 
-#[derive(PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum DxvkStateCacheEdition {
     Standard,
     Legacy
 }
 
+impl Default for DxvkStateCacheEdition {
+    #[inline(always)]
+    fn default() -> Self {
+        DxvkStateCacheEdition::Standard
+    }
+}
+
+#[derive(Clone, Copy)]
 pub struct DxvkStateCacheHeader {
     pub magic:      [u8; 4],
-    pub version:    u32,
+    pub version:    NonZeroU32,
     pub entry_size: u32
+}
+
+impl DxvkStateCacheHeader {
+    pub const fn new(version: NonZeroU32, entry_size: u32) -> Self {
+        DxvkStateCacheHeader {
+            magic: MAGIC_STRING,
+            version: version,
+            entry_size: entry_size,
+        }
+    }
+
+    #[inline]
+    pub fn edition(&self) -> DxvkStateCacheEdition {
+        if self.version.get() > LEGACY_VERSION {
+            DxvkStateCacheEdition::Standard
+        } else {
+            DxvkStateCacheEdition::Legacy
+        }
+    }
 }
 
 pub struct DxvkStateCacheEntryHeader {

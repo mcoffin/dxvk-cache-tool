@@ -1,36 +1,47 @@
-use std::io;
+use std::{
+    io,
+    num::NonZeroU32,
+};
 
-#[derive(Clone, Copy, PartialEq, Debug)]
-pub enum ErrorKind {
-    IoError(io::ErrorKind),
-    InvalidInput,
-    InvalidData
+#[derive(Debug, thiserror::Error)]
+pub enum HeaderError {
+    #[error("{0}")]
+    Io(#[from] io::Error),
+    #[error("Magic string mismatch")]
+    MagicStringMismatch,
+    #[error("Header contained invalid zero version")]
+    InvalidVersion,
 }
 
-#[derive(Debug)]
-pub struct Error {
-    kind:    ErrorKind,
-    message: String
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    #[error("{0}")]
+    Io(#[from] io::Error),
+    #[error("File extension mismatch: found: {0:?}, expected .dxvk-cache")]
+    InvalidInputExtension(Option<String>),
+    #[error("State cache version mismatch: expected v{expected}, found v{found}")]
+    VersionMismatch {
+        expected: NonZeroU32,
+        found: NonZeroU32,
+    },
+    #[error("No valid state cache entries found")]
+    NoEntriesFound,
+    #[error("Error reading header: {0}")]
+    ReadHeader(#[from] HeaderError),
 }
 
 impl Error {
-    pub fn new<S: Into<String>>(kind: ErrorKind, message: S) -> Self {
-        Error {
-            kind,
-            message: message.into()
+    pub const fn version_mismatch(expected: NonZeroU32, found: NonZeroU32) -> Self {
+        Error::VersionMismatch {
+            expected: expected,
+            found: found,
         }
     }
 
-    pub fn kind(&self) -> ErrorKind {
-        self.kind
-    }
-}
-
-impl From<io::Error> for Error {
-    fn from(error: io::Error) -> Self {
-        Error {
-            kind:    ErrorKind::IoError(error.kind()),
-            message: error.to_string()
-        }
+    #[inline(always)]
+    pub fn invalid_input_extension<S>(found: S) -> Self where
+        S: Into<Option<String>>,
+    {
+        Error::InvalidInputExtension(found.into())
     }
 }

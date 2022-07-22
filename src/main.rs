@@ -1,33 +1,97 @@
 mod dxvk;
 mod error;
+mod sep;
 
 use std::env;
 use std::ffi::OsStr;
 use std::fs::File;
 use std::io::{self, prelude::*, BufReader, BufWriter};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::num::NonZeroU32;
+use std::cell::Cell;
+use clap::{
+    crate_version,
+    crate_authors,
+    crate_description,
+};
 
 use dxvk::*;
-use error::{Error, ErrorKind};
+use error::{Error, HeaderError};
 use linked_hash_map::LinkedHashMap;
+use sep::Separated;
+
+#[derive(Debug, clap::Parser)]
+#[clap(version = crate_version!(), author = crate_authors!(), about = crate_description!())]
+struct ArgsConfig {
+    #[clap(short, long, default_value = "output.dxvk-cache", help = "Output file name")]
+    output: PathBuf,
+    #[clap(required = true, help = "Input files")]
+    files: Vec<PathBuf>,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+struct HeaderInfo {
+    version: NonZeroU32,
+    entry_size: u32,
+    edition: DxvkStateCacheEdition,
+}
+
+impl<'a> From<&'a DxvkStateCacheHeader> for HeaderInfo {
+    #[inline(always)]
+    fn from(header: &'a DxvkStateCacheHeader) -> Self {
+        HeaderInfo {
+            entry_size: header.entry_size,
+            version: header.version,
+            edition: header.edition(),
+        }
+    }
+}
+
+impl Into<DxvkStateCacheHeader> for HeaderInfo {
+    #[inline(always)]
+    fn into(self) -> DxvkStateCacheHeader {
+        DxvkStateCacheHeader::new(self.version, self.entry_size)
+    }
+}
 
 struct Config {
     files:      Vec<PathBuf>,
     output:     PathBuf,
-    entry_size: u32,
-    version:    u32,
-    edition:    DxvkStateCacheEdition
+    header_info: Cell<Option<HeaderInfo>>,
 }
 
-impl Default for Config {
-    fn default() -> Self {
+impl From<ArgsConfig> for Config {
+    fn from(cfg: ArgsConfig) -> Self {
         Config {
-            files:      Vec::new(),
-            output:     PathBuf::from("output.dxvk-cache"),
-            entry_size: 0,
-            version:    0,
-            edition:    DxvkStateCacheEdition::Standard
+            output: cfg.output,
+            files: cfg.files,
+            header_info: Cell::new(None),
         }
+    }
+}
+
+impl Config {
+    pub fn from_args() -> Self {
+        use clap::Parser;
+        ArgsConfig::parse().into()
+    }
+
+    pub fn check_header(&self, header: &DxvkStateCacheHeader) -> Result<(), Error> {
+        match self.header_info.get() {
+            None => {
+                self.header_info.set(Some(HeaderInfo::from(header)));
+                println!("Detected state cache version v{}", header.version);
+                Ok(())
+            },
+            Some(HeaderInfo { version, .. }) if version != header.version =>
+                Err(Error::version_mismatch(version, header.version)),
+            Some(..) => Ok(()),
+        }
+    }
+
+    #[inline(always)]
+    pub fn files<'a>(&'a self) -> impl Iterator<Item=&'a Path> + 'a {
+        self.files.iter().map(<PathBuf as AsRef<Path>>::as_ref)
     }
 }
 
@@ -87,96 +151,22 @@ trait WriteEx: Write {
     }
 }
 
-fn print_help() {
-    println!("Standalone dxvk-cache merger");
-    println!("USAGE:\n\tdxvk-cache-tool [OPTION]... <FILEs>...\n");
-    println!("OPTIONS:");
-    println!("\t-o, --output FILE\tSet output file name");
-    println!("\t-h, --help\t\tDisplay this help and exit");
-    println!("\t-V, --version\t\tOutput version information and exit");
-}
-
-fn process_args() -> Config {
-    let mut config = Config::default();
-    let mut args: Vec<String> = env::args().collect();
-    for (i, arg) in env::args().enumerate().rev() {
-        match arg.as_ref() {
-            "-h" | "--help" => {
-                print_help();
-                std::process::exit(0);
-            },
-            "-o" | "--output" => {
-                config.output = PathBuf::from(&args[i + 1]);
-                args.drain(i..=i + 1);
-            },
-            "-V" | "--version" => {
-                println!("{} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
-                std::process::exit(0);
-            },
-            "--frog" => {
-                println!("🐸");
-                std::process::exit(0);
-            },
-            _ => ()
-        }
-    }
-    if args.len() <= 1 {
-        print_help();
-        std::process::exit(0);
-    }
-    args.remove(0);
-    for arg in args {
-        config.files.push(PathBuf::from(arg));
-    }
-    config
-}
-
 fn main() -> Result<(), Error> {
-    let mut config = process_args();
+    let config = Config::from_args();
 
-    print!("Merging files");
-    for path in config.files.iter() {
-        print!(" {}", path.file_name().and_then(OsStr::to_str).unwrap());
-    }
-    println!();
+    println!("Merging files: {}", Separated::new(" ", || config.files().map(|p| p.display())));
     let mut entries = LinkedHashMap::new();
     for (i, path) in config.files.iter().enumerate() {
-        if path.extension().and_then(OsStr::to_str) != Some("dxvk-cache") {
-            return Err(Error::new(
-                ErrorKind::InvalidInput,
-                "File extension mismatch: expected .dxvk-cache"
-            ));
+        let ext = path.extension().and_then(OsStr::to_str);
+        if ext != Some("dxvk-cache") {
+            return Err(Error::invalid_input_extension(ext.map(String::from)));
         }
 
         let file = File::open(path)?;
         let mut reader = BufReader::new(file);
 
         let header = read_header(&mut reader)?;
-
-        if header.magic != MAGIC_STRING {
-            return Err(Error::new(ErrorKind::InvalidData, "Magic string mismatch"));
-        }
-
-        if config.version == 0 {
-            config.version = header.version;
-            config.edition = if header.version > LEGACY_VERSION {
-                DxvkStateCacheEdition::Standard
-            } else {
-                DxvkStateCacheEdition::Legacy
-            };
-            config.entry_size = header.entry_size;
-            println!("Detected state cache version v{}", header.version);
-        }
-
-        if header.version != config.version {
-            return Err(Error::new(
-                ErrorKind::InvalidInput,
-                format!(
-                    "State cache version mismatch: expected v{}, found v{}",
-                    config.version, header.version
-                )
-            ));
-        }
+        config.check_header(&header)?;
 
         let mut omitted = 0;
         let entries_len = entries.len();
@@ -187,7 +177,7 @@ fn main() -> Result<(), Error> {
             config.files.len()
         );
         loop {
-            let res = match config.edition {
+            let res = match header.edition() {
                 DxvkStateCacheEdition::Standard => read_entry(&mut reader),
                 DxvkStateCacheEdition::Legacy => {
                     read_entry_legacy(&mut reader, header.entry_size as usize)
@@ -201,7 +191,7 @@ fn main() -> Result<(), Error> {
                         omitted += 1;
                     }
                 },
-                Err(ref e) if e.kind() == ErrorKind::IoError(io::ErrorKind::UnexpectedEof) => break,
+                Err(Error::Io(ref e)) if e.kind() == io::ErrorKind::UnexpectedEof => break,
                 Err(e) => return Err(e)
             }
         }
@@ -212,10 +202,7 @@ fn main() -> Result<(), Error> {
     }
 
     if entries.is_empty() {
-        return Err(Error::new(
-            ErrorKind::InvalidData,
-            "No valid state cache entries found"
-        ));
+        return Err(Error::NoEntriesFound);
     }
 
     println!(
@@ -224,17 +211,13 @@ fn main() -> Result<(), Error> {
         config.output.file_name().and_then(OsStr::to_str).unwrap()
     );
 
-    let header = DxvkStateCacheHeader {
-        magic:      MAGIC_STRING,
-        version:    config.version,
-        entry_size: config.entry_size
-    };
+    let header = config.header_info.get().unwrap().into();
 
     let file = File::create(&config.output)?;
     let mut writer = BufWriter::new(file);
     wrtie_header(&mut writer, header)?;
     for (_, entry) in &entries {
-        match config.edition {
+        match header.edition() {
             DxvkStateCacheEdition::Standard => write_entry(&mut writer, entry)?,
             DxvkStateCacheEdition::Legacy => write_entry_legacy(&mut writer, entry)?
         };
@@ -245,16 +228,25 @@ fn main() -> Result<(), Error> {
     Ok(())
 }
 
-fn read_header<R: Read>(reader: &mut BufReader<R>) -> Result<DxvkStateCacheHeader, Error> {
-    Ok(DxvkStateCacheHeader {
+fn read_header<R: Read>(reader: &mut BufReader<R>) -> Result<DxvkStateCacheHeader, HeaderError> {
+    let ret = DxvkStateCacheHeader {
         magic:      {
             let mut magic = [0; 4];
             reader.read_exact(&mut magic)?;
+            if magic != MAGIC_STRING {
+                return Err(HeaderError::MagicStringMismatch);
+            }
             magic
         },
-        version:    reader.read_u32()?,
+        version:    {
+            let v = reader.read_u32()?;
+            NonZeroU32::new(v)
+                .map(Ok)
+                .unwrap_or(Err(HeaderError::InvalidVersion))?
+        },
         entry_size: reader.read_u32()?
-    })
+    };
+    Ok(ret)
 }
 
 fn read_entry<R: Read>(reader: &mut BufReader<R>) -> Result<DxvkStateCacheEntry, Error> {
@@ -285,7 +277,7 @@ fn wrtie_header<W: Write>(
     header: DxvkStateCacheHeader
 ) -> Result<(), Error> {
     writer.write_all(&MAGIC_STRING)?;
-    writer.write_u32(header.version)?;
+    writer.write_u32(header.version.get())?;
     writer.write_u32(header.entry_size as u32)?;
 
     Ok(())
