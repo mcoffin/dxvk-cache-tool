@@ -250,11 +250,7 @@ fn main() {
                 Ok(())
             },
             Command::Jumble { input_file, output_file } => {
-                let f = fs::OpenOptions::new()
-                    .read(true)
-                    .open(input_file)
-                    .map(BufReader::new)?;
-                let cache = DxvkStateCache::from_reader(f)?;
+                let cache = DxvkStateCache::from_file(input_file)?;
                 let f = fs::OpenOptions::new()
                     .write(true)
                     .create(true)
@@ -264,11 +260,7 @@ fn main() {
             },
             Command::ListEntries { files } => {
                 for f in files.iter() {
-                    let f = fs::OpenOptions::new()
-                        .read(true)
-                        .open(f)
-                        .map(BufReader::new)?;
-                    let cache = DxvkStateCache::from_reader(f)?;
+                    let cache = DxvkStateCache::from_file(f)?;
                     cache.iter().for_each(|entry| {
                         println!("{}", entry.hash_display());
                     });

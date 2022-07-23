@@ -15,6 +15,8 @@ use std::{
         Write,
     },
     fmt,
+    path::Path,
+    fs,
 };
 use byteorder::{
     ReadBytesExt,
@@ -359,6 +361,15 @@ impl DxvkStateCache {
 
     pub fn iter<'a>(&'a self) -> impl ExactSizeIterator<Item=&'a DxvkStateCacheEntry> + 'a {
         self.entries.iter().map(|v| &v.0)
+    }
+
+    pub fn from_file<P: AsRef<Path>>(p: P) -> Result<Self, ReadError> {
+        fs::OpenOptions::new()
+            .read(true)
+            .open(p)
+            .map(io::BufReader::new)
+            .map_err(ReadError::from)
+            .and_then(Self::from_reader)
     }
 }
 
