@@ -2,16 +2,9 @@ use std::{
     io,
     num::NonZeroU32,
 };
-
-#[derive(Debug, thiserror::Error)]
-pub enum HeaderError {
-    #[error("{0}")]
-    Io(#[from] io::Error),
-    #[error("Magic string mismatch")]
-    MagicStringMismatch,
-    #[error("Header contained invalid zero version")]
-    InvalidVersion,
-}
+use crate::{
+    dxvk::{HeaderError, EntryError},
+};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -28,6 +21,8 @@ pub enum Error {
     NoEntriesFound,
     #[error("Error reading header: {0}")]
     ReadHeader(#[from] HeaderError),
+    #[error("Error reading entry: {0}")]
+    ReadEntry(#[from] EntryError),
 }
 
 impl Error {
