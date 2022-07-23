@@ -374,13 +374,19 @@ impl DxvkStateCache {
 }
 
 #[repr(transparent)]
-pub struct HashDisplay<'a>(&'a [u8]);
+pub struct HashDisplay<'a>(&'a [u8; HASH_SIZE]);
 
 impl<'a> fmt::Display for HashDisplay<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for &b in self.0 {
-            write!(f, "{:02x}", b)?;
+        const HASH_STR_SIZE: usize = HASH_SIZE * 2;
+        let mut buf = [0u8; HASH_STR_SIZE];
+        {
+            let mut w = io::Cursor::new(&mut buf as &mut [u8]);
+            for &b in self.0 {
+                write!(w, "{:02x}", b).unwrap();
+            }
         }
-        Ok(())
+        let s = unsafe { std::str::from_utf8_unchecked(&buf) };
+        write!(f, "{}", s)
     }
 }
