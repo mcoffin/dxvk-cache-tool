@@ -1,5 +1,10 @@
 use sha1::Sha1;
 use std::{
+    collections::HashSet,
+    hash::{
+        Hash,
+        Hasher,
+    },
     num::NonZeroU32,
     io::{
         self,
@@ -25,6 +30,7 @@ const SHA1_EMPTY: Sha1Hash = [
     218, 57, 163, 238, 94, 107, 75, 13, 50, 85, 191, 239, 149, 96, 24, 144, 175, 216, 7, 9
 ];
 type DxvkEndian = NativeEndian;
+type EntryHash = [u8; HASH_SIZE];
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum DxvkStateCacheEdition {
@@ -251,5 +257,98 @@ impl DxvkStateCacheEntry {
         let hash = hasher.digest().bytes();
 
         hash == self.hash
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ReadError {
+    #[error("{0}")]
+    Io(#[from] io::Error),
+    #[error("Error reading header: {0}")]
+    ReadHeader(#[from] HeaderError),
+    #[error("Error reading entry: {0}")]
+    ReadEntry(#[from] EntryError),
+    #[error("Duplicate entry in state cache")]
+    DuplicateEntry,
+}
+
+#[derive(Debug)]
+#[repr(transparent)]
+pub struct EntryWrapper(DxvkStateCacheEntry);
+
+impl Hash for EntryWrapper {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        state.write(self.0.data.as_slice());
+    }
+}
+
+impl PartialEq for EntryWrapper {
+    fn eq(&self, other: &EntryWrapper) -> bool {
+        self.0.hash == other.0.hash
+    }
+}
+
+impl Eq for EntryWrapper {}
+
+impl From<DxvkStateCacheEntry> for EntryWrapper {
+    #[inline(always)]
+    fn from(e: DxvkStateCacheEntry) -> Self {
+        EntryWrapper(e)
+    }
+}
+
+impl EntryWrapper {
+    #[inline(always)]
+    pub fn unwrap(self) -> DxvkStateCacheEntry {
+        self.0
+    }
+}
+
+#[derive(Debug)]
+pub struct DxvkStateCache {
+    pub header: DxvkStateCacheHeader,
+    pub entries: HashSet<EntryWrapper>,
+}
+
+impl FromReader for DxvkStateCache {
+    type Error = ReadError;
+
+    fn from_reader<R: Read>(mut reader: R) -> Result<Self, Self::Error> {
+        let mut entries: HashSet<EntryWrapper> = HashSet::new();
+        let header = DxvkStateCacheHeader::from_reader(&mut reader)?;
+        let mut try_read_entry = || {
+            match DxvkStateCacheEntry::from_reader(&mut reader, &header) {
+                Ok(v) => Ok(Some(v)),
+                Err(EntryError::Io(ref e)) if e.kind() == io::ErrorKind::UnexpectedEof => Ok(None),
+                Err(e) => Err(e),
+            }
+        };
+        while let Some(e) = try_read_entry()?.map(EntryWrapper::from) {
+            if !entries.insert(e) {
+                return Err(ReadError::DuplicateEntry);
+            }
+        }
+        Ok(DxvkStateCache {
+            header: header,
+            entries: entries,
+        })
+    }
+}
+
+impl DxvkStateCache {
+    pub fn write_to<W: Write>(&self, mut writer: W) -> Result<(), io::Error> {
+        if self.entries.len() < 1 {
+            return Err(io::Error::new(io::ErrorKind::Other, "No entries to write"));
+        }
+        self.header.write_to(&mut writer)?;
+        let edition = self.header.edition();
+        for e in self.entries.iter() {
+            e.0.write_to(&mut writer, edition)?;
+        }
+        Ok(())
+    }
+
+    pub fn iter<'a>(&'a self) -> impl ExactSizeIterator<Item=&'a DxvkStateCacheEntry> + 'a {
+        self.entries.iter().map(|v| &v.0)
     }
 }
