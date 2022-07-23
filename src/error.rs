@@ -10,8 +10,6 @@ use crate::{
 pub enum Error {
     #[error("{0}")]
     Io(#[from] io::Error),
-    #[error("File extension mismatch: found: {0:?}, expected .dxvk-cache")]
-    InvalidInputExtension(Option<String>),
     #[error("State cache version mismatch: expected v{expected}, found v{found}")]
     VersionMismatch {
         expected: NonZeroU32,
@@ -31,12 +29,5 @@ impl Error {
             expected: expected,
             found: found,
         }
-    }
-
-    #[inline(always)]
-    pub fn invalid_input_extension<S>(found: S) -> Self where
-        S: Into<Option<String>>,
-    {
-        Error::InvalidInputExtension(found.into())
     }
 }

@@ -54,10 +54,12 @@ enum Command {
         input_file: PathBuf,
         output_file: PathBuf,
     },
+    #[clap(about = "List SHA1 hashes of all entries in the given state caches")]
     ListEntries {
         #[clap(required = true, help = "dxvk-cache files")]
         files: Vec<PathBuf>,
     },
+    #[clap(about = "List SHA1 hashes of all entries present in the first file but not the second")]
     Difference(DifferenceConfig),
 }
 
@@ -65,7 +67,7 @@ enum Command {
 struct DifferenceConfig {
     first: PathBuf,
     second: PathBuf,
-    #[clap(short, long = "output")]
+    #[clap(short, long = "output", help = "output filename - if set, the entries are written as a cache file here instead of printed")]
     output_file: Option<PathBuf>,
 }
 
