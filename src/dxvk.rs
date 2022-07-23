@@ -232,6 +232,11 @@ impl DxvkStateCacheEntry {
             DxvkStateCacheEdition::Standard => self.write_standard(w),
         }
     }
+
+    #[inline(always)]
+    pub fn hash_display<'a>(&'a self) -> HashDisplay<'a> {
+        HashDisplay(&self.hash)
+    }
 }
 
 impl DxvkStateCacheEntry {
@@ -354,5 +359,17 @@ impl DxvkStateCache {
 
     pub fn iter<'a>(&'a self) -> impl ExactSizeIterator<Item=&'a DxvkStateCacheEntry> + 'a {
         self.entries.iter().map(|v| &v.0)
+    }
+}
+
+#[repr(transparent)]
+pub struct HashDisplay<'a>(&'a [u8]);
+
+impl<'a> fmt::Display for HashDisplay<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for &b in self.0 {
+            write!(f, "{:02x}", b)?;
+        }
+        Ok(())
     }
 }

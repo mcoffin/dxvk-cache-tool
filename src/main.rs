@@ -54,6 +54,10 @@ enum Command {
         input_file: PathBuf,
         output_file: PathBuf,
     },
+    ListEntries {
+        #[clap(required = true, help = "dxvk-cache files")]
+        files: Vec<PathBuf>,
+    },
 }
 
 #[derive(Debug, clap::Args)]
@@ -261,6 +265,19 @@ fn main() {
                     .create(true)
                     .open(output_file)?;
                 cache.write_to(f)?;
+                Ok(())
+            },
+            Command::ListEntries { files } => {
+                for f in files.iter() {
+                    let f = fs::OpenOptions::new()
+                        .read(true)
+                        .open(f)
+                        .map(BufReader::new)?;
+                    let cache = DxvkStateCache::from_reader(f)?;
+                    cache.iter().for_each(|entry| {
+                        println!("{}", entry.hash_display());
+                    });
+                }
                 Ok(())
             },
         }
