@@ -139,11 +139,6 @@ impl MergeConfig {
         info!("Merging files: {}", Separated::new(" ", || config.files().map(|p| p.display())));
         let mut entries = LinkedHashMap::new();
         for (i, path) in config.files.iter().enumerate() {
-            let ext = path.extension().and_then(OsStr::to_str);
-            if ext != Some("dxvk-cache") {
-                return Err(Error::invalid_input_extension(ext.map(String::from)));
-            }
-
             let file = File::open(path)?;
             let mut reader = BufReader::new(file);
 
