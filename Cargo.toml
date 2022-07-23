@@ -10,5 +10,12 @@ edition = "2018"
 [dependencies]
 sha1 = "0.6.0"
 linked-hash-map = "0.5.2"
-clap = { version = "3.2", features = ["color", "derive", "cargo"] }
+clap = { version = "3.2", features = ["derive", "cargo"] }
 thiserror = "1.0"
+byteorder = "1.4"
+log = "0.4"
+env_logger = "0.9"
+
+[features]
+default = ["color"]
+color = ["clap/color"]
