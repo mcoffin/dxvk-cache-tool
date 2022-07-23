@@ -1,4 +1,7 @@
-use sha1::Sha1;
+use sha1::{
+    Sha1,
+    Digest,
+};
 use std::{
     collections::HashSet,
     hash::{
@@ -254,7 +257,8 @@ impl DxvkStateCacheEntry {
         if self.header.is_none() {
             hasher.update(&SHA1_EMPTY);
         }
-        let hash = hasher.digest().bytes();
+        let hash = hasher.finalize();
+        let hash: EntryHash = unsafe { std::mem::transmute(hash) };
 
         hash == self.hash
     }
