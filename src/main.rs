@@ -58,6 +58,15 @@ enum Command {
         #[clap(required = true, help = "dxvk-cache files")]
         files: Vec<PathBuf>,
     },
+    Difference(DifferenceConfig),
+}
+
+#[derive(Debug, clap::Args)]
+struct DifferenceConfig {
+    first: PathBuf,
+    second: PathBuf,
+    #[clap(short, long = "output")]
+    output_file: Option<PathBuf>,
 }
 
 #[derive(Debug, clap::Args)]
@@ -220,6 +229,32 @@ fn inspect<P: AsRef<Path>, Pfx: std::fmt::Display>(prefix: Option<&Pfx>, f: P) -
     Ok(())
 }
 
+impl DifferenceConfig {
+    fn run(self) -> Result<(), Box<dyn StdError + 'static>> {
+        let mut fst = DxvkStateCache::from_file(self.first)?;
+        let snd = DxvkStateCache::from_file(self.second)?;
+        if fst.header.version != snd.header.version {
+            return Err(Box::new(io::Error::new(io::ErrorKind::Other, format!("version mismatch: v{} != v{}", fst.header.version, snd.header.version))));
+        }
+        fst.entries = fst.entries.difference(&snd.entries)
+            .map(Clone::clone)
+            .collect();
+
+        if let Some(output_file) = self.output_file {
+            let f = fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .open(output_file)?;
+            fst.write_to(f)?;
+        } else {
+            fst.iter().for_each(|entry| {
+                println!("{}", entry.hash_display());
+            });
+        }
+        Ok(())
+    }
+}
+
 #[inline(always)]
 fn run_main<F, E>(f: F)
 where
@@ -267,6 +302,7 @@ fn main() {
                 }
                 Ok(())
             },
+            Command::Difference(cfg) => cfg.run(),
         }
     })
 }

@@ -283,7 +283,7 @@ pub enum ReadError {
     DuplicateEntry,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 #[repr(transparent)]
 pub struct EntryWrapper(DxvkStateCacheEntry);
 
