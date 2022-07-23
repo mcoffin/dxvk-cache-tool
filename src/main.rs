@@ -61,6 +61,12 @@ enum Command {
     },
     #[clap(about = "List SHA1 hashes of all entries present in the first file but not the second")]
     Difference(DifferenceConfig),
+    Merge2 {
+        #[clap(long, short, default_value = "output.dxvk-cache")]
+        output_file: PathBuf,
+        #[clap(required = true)]
+        files: Vec<PathBuf>,
+    },
 }
 
 #[derive(Debug, clap::Args)]
@@ -243,10 +249,7 @@ impl DifferenceConfig {
             .collect();
 
         if let Some(output_file) = self.output_file {
-            let f = fs::OpenOptions::new()
-                .write(true)
-                .create(true)
-                .open(output_file)?;
+            let f = open_output(output_file)?;
             fst.write_to(f)?;
         } else {
             fst.iter().for_each(|entry| {
@@ -269,6 +272,14 @@ where
     }
 }
 
+fn open_output<P: AsRef<Path>>(p: P) -> io::Result<fs::File> {
+    fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(p)
+}
+
 fn main() {
     logging::init();
     run_main(|| -> Result<(), Box<dyn StdError + 'static>> {
@@ -288,10 +299,7 @@ fn main() {
             },
             Command::Jumble { input_file, output_file } => {
                 let cache = DxvkStateCache::from_file(input_file)?;
-                let f = fs::OpenOptions::new()
-                    .write(true)
-                    .create(true)
-                    .open(output_file)?;
+                let f = open_output(output_file)?;
                 cache.write_to(f)?;
                 Ok(())
             },
@@ -305,6 +313,21 @@ fn main() {
                 Ok(())
             },
             Command::Difference(cfg) => cfg.run(),
+            Command::Merge2 { output_file, files } => {
+                let mut files = files.iter();
+                let mut cache = DxvkStateCache::from_file(files.next().unwrap())?;
+                for f in files {
+                    fs::OpenOptions::new()
+                        .read(true)
+                        .open(f)
+                        .map(io::BufReader::new)
+                        .map_err(ReadError::from)
+                        .and_then(|r| cache.append_from(r))?;
+                }
+                let f = open_output(output_file)?;
+                cache.write_to(f)?;
+                Ok(())
+            },
         }
     })
 }

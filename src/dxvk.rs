@@ -281,6 +281,11 @@ pub enum ReadError {
     ReadEntry(#[from] EntryError),
     #[error("Duplicate entry in state cache")]
     DuplicateEntry,
+    #[error("version mismatch: found v{found}, expected v{expected}")]
+    VersionMismatch {
+        found: NonZeroU32,
+        expected: NonZeroU32,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -370,6 +375,30 @@ impl DxvkStateCache {
             .map(io::BufReader::new)
             .map_err(ReadError::from)
             .and_then(Self::from_reader)
+    }
+
+    pub fn append_from<R: Read>(&mut self, mut reader: R) -> Result<usize, ReadError> {
+        let header = DxvkStateCacheHeader::from_reader(&mut reader)?;
+        if header.version != self.header.version {
+            return Err(ReadError::VersionMismatch {
+                found: header.version,
+                expected: self.header.version,
+            });
+        }
+        let mut try_read_entry = || {
+            match DxvkStateCacheEntry::from_reader(&mut reader, &header) {
+                Ok(v) => Ok(Some(v)),
+                Err(EntryError::Io(ref e)) if e.kind() == io::ErrorKind::UnexpectedEof => Ok(None),
+                Err(e) => Err(e),
+            }
+        };
+        let mut new_count = 0usize;
+        while let Some(e) = try_read_entry()?.map(EntryWrapper::from) {
+            if self.entries.insert(e) {
+                new_count = new_count + 1;
+            }
+        }
+        Ok(new_count)
     }
 }
 
